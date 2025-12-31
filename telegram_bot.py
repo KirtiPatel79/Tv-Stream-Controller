@@ -16,7 +16,7 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from state import manual_stream
+from state import manual_stream, presets, save_state
 from youtube import fetch_channel_streams, set_channel_id
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -67,7 +67,8 @@ def update_env_file(key: str, value: str):
 
 def main_menu():
     keyboard = [
-        [InlineKeyboardButton("▶ Play Custom URL", callback_data="play"), InlineKeyboardButton("📡 Channel Streams", callback_data="channel_streams")],
+        [InlineKeyboardButton("▶ Play Manual", callback_data="play"), InlineKeyboardButton("📡 Channel Streams", callback_data="channel_streams")],
+        [InlineKeyboardButton("🔖 Manage Presets", callback_data="manage_presets")],
         [InlineKeyboardButton("🆔 Set Channel ID", callback_data="set_channel"), InlineKeyboardButton("⏹ Stop Stream", callback_data="stop")],
         [InlineKeyboardButton("📺 Status", callback_data="status"), InlineKeyboardButton("ℹ️ Help", callback_data="help")],
     ]
@@ -112,9 +113,72 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "play":
         context.user_data["awaiting_url"] = True
         context.user_data["awaiting_channel_id"] = False
+        
+        keyboard = []
+        # Dynamic Presets
+        for idx, preset in enumerate(presets):
+            keyboard.append([InlineKeyboardButton(f"📺 {preset['title']}", callback_data=f"play_preset_{idx}")])
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back")])
+        
         await query.message.reply_text(
-            "📥 Send the YouTube or live stream URL:"
+            "📥 Send a YouTube or live stream URL\n"
+            "OR select a quick preset below:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
+
+    elif query.data.startswith("play_preset_"):
+        idx = int(query.data.replace("play_preset_", ""))
+        if 0 <= idx < len(presets):
+            preset = presets[idx]
+            manual_stream["enabled"] = True
+            manual_stream["url"] = preset["url"]
+            manual_stream["title"] = preset["title"]
+            manual_stream["updated_at"] = int(time.time())
+            save_state()
+            
+            await query.message.reply_text(
+                f"✅ Playing: {preset['title']}\n\n🔗 {preset['url']}",
+                reply_markup=main_menu()
+            )
+
+    elif query.data == "manage_presets":
+        keyboard = [
+            [InlineKeyboardButton("➕ Add Preset", callback_data="add_preset")],
+            [InlineKeyboardButton("🗑 Delete Preset", callback_data="list_delete_presets")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="back")]
+        ]
+        
+        text = "🔖 Saved Presets:\n\n"
+        if not presets:
+            text += "No presets saved."
+        for p in presets:
+            text += f"• {p['title']}\n"
+            
+        await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif query.data == "add_preset":
+        context.user_data["awaiting_preset_url"] = True
+        await query.message.reply_text("📥 Send the URL for the new preset:")
+
+    elif query.data == "list_delete_presets":
+        if not presets:
+            await query.message.reply_text("No presets to delete.", reply_markup=main_menu())
+            return
+            
+        keyboard = []
+        for idx, p in enumerate(presets):
+            keyboard.append([InlineKeyboardButton(f"❌ Delete {p['title']}", callback_data=f"delete_preset_{idx}")])
+        keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="manage_presets")])
+        
+        await query.message.reply_text("Select a preset to delete:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif query.data.startswith("delete_preset_"):
+        idx = int(query.data.replace("delete_preset_", ""))
+        if 0 <= idx < len(presets):
+            deleted = presets.pop(idx)
+            save_state()
+            await query.message.reply_text(f"✅ Deleted: {deleted['title']}", reply_markup=main_menu())
 
     elif query.data == "set_channel":
         context.user_data["awaiting_channel_id"] = True
@@ -168,6 +232,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             manual_stream["title"] = selected["title"]
             manual_stream["thumbnail"] = selected.get("thumbnail")
             manual_stream["updated_at"] = int(time.time())
+            save_state()
             
             await query.message.reply_text(
                 f"▶ Playing: {selected['title']}\n\n{stream_url}",
@@ -179,6 +244,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         manual_stream["url"] = None
         manual_stream["title"] = None
         manual_stream["updated_at"] = int(time.time())
+        save_state()
 
         await query.message.reply_text(
             "⏹ Manual stream stopped",
@@ -209,6 +275,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("awaiting_preset_url"):
+        url = update.message.text.strip()
+        if not url.startswith(("http://", "https://")):
+            await update.message.reply_text("❌ Invalid URL. Start with http:// or https://")
+            return
+        context.user_data["new_preset_url"] = url
+        context.user_data["awaiting_preset_url"] = False
+        context.user_data["awaiting_preset_title"] = True
+        await update.message.reply_text("📛 Now send a Title for this preset:")
+        return
+
+    if context.user_data.get("awaiting_preset_title"):
+        title = update.message.text.strip()
+        url = context.user_data.get("new_preset_url")
+        presets.append({"title": title, "url": url})
+        save_state()
+        context.user_data["awaiting_preset_title"] = False
+        await update.message.reply_text(f"✅ Preset '{title}' added!", reply_markup=main_menu())
+        return
+
     if context.user_data.get("awaiting_url"):
         url = update.message.text.strip()
         context.user_data["awaiting_url"] = False
@@ -224,6 +310,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         manual_stream["url"] = url
         manual_stream["title"] = "Manual Stream"
         manual_stream["updated_at"] = int(time.time())
+        save_state()
 
         await update.message.reply_text(
             f"✅ Stream set successfully\n\n🔗 {url}",

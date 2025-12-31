@@ -1,0 +1,19 @@
+{
+  "manual_stream": {
+    "enabled": false,
+    "title": null,
+    "url": null,
+    "updated_at": null,
+    "thumbnail": null
+  },
+  "presets": [
+    {
+      "title": "Evening Aarti",
+      "url": "https://www.youtube.com/watch?v=6QZZ2ZkgVuU"
+    },
+    {
+      "title": "Morning Aarti",
+      "url": "https://youtu.be/U5xYAEqDMlc"
+    }
+  ]
+}

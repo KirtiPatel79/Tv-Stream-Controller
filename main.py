@@ -6,7 +6,7 @@ import os
 import threading
 import uvicorn
 from fastapi import FastAPI
-from state import manual_stream
+from state import manual_stream, presets
 from youtube import fetch_channel_streams
 from telegram_bot import start_bot
 
@@ -19,8 +19,11 @@ def startup():
 
 
 @app.get("/current")
-def get_manual_stream():
-    return manual_stream
+def get_status():
+    return {
+        "manual_stream": manual_stream,
+        "presets": presets
+    }
 
 
 @app.get("/channel-streams")
