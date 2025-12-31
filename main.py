@@ -18,6 +18,11 @@ def startup():
     threading.Thread(target=start_bot, daemon=True).start()
 
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+
 @app.get("/current")
 def get_status():
     return {
